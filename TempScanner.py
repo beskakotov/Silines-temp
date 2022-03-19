@@ -338,7 +338,7 @@ class Rodos(iRodos):
         self.__temperature_log__ = {}
     
     def find_sensors(self):
-        self.__sensors__ = self.__find_sensor__()
+        self.__sensors__ = self.__find_sensors__()
     
     def get_temperature(self):
         for sensor in self.__sensors__:
