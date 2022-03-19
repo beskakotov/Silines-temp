@@ -12,13 +12,12 @@ class iRodos:
             sleep(3)
     
     def __find_sensors__(self):
-        rom_list = []
+        self.__sensors__ = []
         self.__sensor_count__ = 0
         if self.__search_rom__(0, 0):
             logger.info("Найдено DALLAS - {}".format(self.__sensor_count__))
         else:
             logger.error('Датчики DALLAS не найдены')
-        return rom_list
     
     def __clear_buffer__(self):
         self.USB_BUFO = [0]*9
@@ -203,7 +202,7 @@ class iRodos:
         for TryCount in range(3):
             if self.__ow_reset__():
                 if self.__ow_write_byte__(0x55):
-                    if self.__ow_write_4byte__((ROM >> 32) & 0xFFFFFFFF):
+                    if self.__ow_write_4byte__(ROM & 0xFFFFFFFF):
                         RESULT = self.__ow_write_4byte__((ROM >> 32) & 0xFFFFFFFF)
                         if RESULT:
                             break
@@ -274,8 +273,7 @@ class iRodos:
         if not RESULT:
             logger.error('Ошибка SEARCH_ROM')
         else:
-            print('ROM: ', hex(ROM))
-            self.__rom_list__.append(ROM)
+            self.__sensors__.append(ROM)
             self.__sensor_count__ += 1
         
         for i in range(64):
@@ -313,7 +311,7 @@ class iRodos:
                                 RESULT = CRC == 0 
                                 K = self.__memory__['L1'] & 0xFFFF
                                 T = 1000
-                                if FAMILY == 0x28 | FAMILY == 0x22:
+                                if FAMILY == 0x28 or FAMILY == 0x22:
                                     T = K * 0.0625
                                 elif FAMILY == 0x10:
                                     T = K*0.5
@@ -338,7 +336,7 @@ class Rodos(iRodos):
         self.__temperature_log__ = {}
     
     def find_sensors(self):
-        self.__sensors__ = self.__find_sensors__()
+        self.__find_sensors__()
     
     def get_temperature(self):
         for sensor in self.__sensors__:
