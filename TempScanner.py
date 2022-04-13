@@ -1,6 +1,8 @@
-import hid
 from time import sleep, monotonic
+import hid
+
 from loguru import logger
+
 
 class iRodos:
     def __find_device__(self):
@@ -347,6 +349,7 @@ if __name__ == "__main__":
     rodos = Rodos()
     rodos.find_sensors()
     while True:
+        rodos.__skip_rom_convert__()
         rodos.get_temperature()
         sleep(1)
     rodos.close()
