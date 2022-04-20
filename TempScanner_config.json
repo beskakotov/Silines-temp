@@ -4,6 +4,9 @@
     "sensor_list": [
         3675523769448857384
     ],
-    "save_path": "D:\\_GIT\\Silines-temp\\SSI.temp",
-    "additional_log_path": []
+    "temp_file_path": "D:\\_GIT\\Silines-temp\\SSI.temp",
+    "loggers": [
+        ["./TempScanner.log", "WARNING"]
+    ],
+    "reading_period": 2
 }
