@@ -1,4 +1,3 @@
-
 from distutils.command.config import config
 from time import sleep, monotonic
 import logging
@@ -11,7 +10,6 @@ import inspect
 from datetime import date, datetime
 import tracemalloc
 
-
 import hid
 
 class RODOS_HID:
@@ -19,10 +17,9 @@ class RODOS_HID:
     USB_BUFO = [0] * 9
     TEMPERATURE_LOG = {}
 
-
     @classmethod
     def initialize(cls):
-        cls.logger = configure_logger(cls.__name__)
+        cls.logger = Logger(cls.__name__)
         cls.logger.debug('Инициализация объекта класса RODOS_HID')    
         cls.device = hid.device()
         vid, pid = RODOS_HID.find_device()
@@ -30,7 +27,7 @@ class RODOS_HID:
         try:
             cls.device.get_feature_report(0, 9)
         except ValueError:
-            cls.logger.error('Ошибка открытия устройства. Завершение программы')
+            cls.logger.critical('Ошибка открытия устройства. Завершение программы')
             sys.exit()
         else:
             cls.logger.info(f'Устройство "{hex(vid)}:{hex(pid)}" успешно открыто')
@@ -42,7 +39,7 @@ class RODOS_HID:
             if device['manufacturer_string'] == 'www.masterkit.ru' or device['vendor_id'] == 0x20a0:
                 cls.logger.info(f'''Найдено устройство [{hex(device['vendor_id'])}:{hex(device['product_id'])}]''')
                 return device['vendor_id'], device['product_id']
-        cls.logger.error('Подходящих устройств не найдено. Завершение программы.')
+        cls.logger.critical('Подходящих устройств не найдено. Завершение программы.')
         sys.exit()
     
     @classmethod
@@ -52,7 +49,7 @@ class RODOS_HID:
         if cls.search_rom(0, 0):
             cls.logger.info("Найдено DALLAS - {}".format(len(cls.sensors)))
         else:
-            cls.logger.error('Датчики DALLAS не найдены. Завершение программы')
+            cls.logger.critical('Датчики DALLAS не найдены. Завершение программы')
             sys.exit()
     
     @classmethod
@@ -318,7 +315,7 @@ class RODOS_HID:
                     RESULT = cls.ow_write_byte(0x44)
                     if RESULT: break
         if not RESULT:
-            logger.error('Ошибка SKIP_ROM_CONVERT')
+            cls.logger.error('Ошибка SKIP_ROM_CONVERT')
         return RESULT
     
     @classmethod
@@ -352,116 +349,31 @@ class RODOS_HID:
                                     break
         if not RESULT:
             cls.error_in_method(inspect.currentframe())
+            cls.logger.error(f'Ошибка считывания с датчика: {ROM}')
         return RESULT 
 
 class TemperatureScanner:
     def __init__(self):
-        self.logger = configure_logger(self.__class__.__name__)
-        RODOS_HID.initialize()
-        self.get_config_file()
-        if not self.CONFIG_FILE:
-            self.create_new_config()
-        else:
-            self.logger.debug('Список параметров:')
-            for key in self.CONFIG_FILE:
-                self.logger.debug(f'{key}: {self.CONFIG_FILE[key]}')
+        self.logger = Logger(self.__class__.__name__)
 
-    def create_new_config(self):
-        RODOS_HID.find_sensors()
-        creation_date = datetime.now().strftime('%Y/%m/%d %H:%M:%S')
-        self.CONFIG_FILE = {
-            'creation_date': creation_date,
-            'last_edit_date': creation_date,
-            'sensor_list': tuple(RODOS_HID.sensors),
-            'save_path': os.path.join(os.path.dirname(DEFAULT_CONFIG_FILES[0]), 'SSI.temp'),
-            'additional_log_path': [],
-        }
-        self.LOADED_CONFIG_FILE = DEFAULT_CONFIG_FILES[0]
-        self.logger.debug('Попытка сохранения конфигурационного файла.')
-        json.dump(self.CONFIG_FILE, open(DEFAULT_CONFIG_FILES[0], 'w', encoding='utf-8'), indent=4)
-        self.logger.info(f'Создан новый конфигурационный файл: "{DEFAULT_CONFIG_FILES[0]}"')
-
-    def rescan_sensors(self):
-        RODOS_HID.find_sensors()
-        self.CONFIG_FILE['sensor_list'] = tuple(RODOS_HID.sensors)
-        self.CONFIG_FILE['last_edit_date'] = datetime.now().strftime('%Y/%m/%d %H:%M:%S')
-        self.save_config_file()
-
-    def save_config_file(self):
-        json.dump(self.CONFIG_FILE, open(self.LOADED_CONFIG_FILE, 'w', encoding='utf-8'), indent=4)
-
-    def load_config_file(self, filepath):
-        config_file = json.load(open(filepath, 'r', encoding='utf-8'))
-        return config_file
-
-    def check_config_file(self, filepath):
-        result = True
-        try:
-            config_file = self.load_config_file(filepath)
-            if not 'save_path' in config_file.keys():
-                result = False
-            if not 'sensor_list' in config_file.keys() or len(config_file['sensor_list']) == 0:
-                result = False
-        except:
-            return False
-        else:
-            return result
-
-    def get_config_file(self):
-        self.CONFIG_FILE = {}
-
-        logger.debug('Попытка найти конфигурационный файл')
-        logger.debug('Проверка наличия конфигурационного файла, переданных с аргументами из командной строки')
-        if args.config:
-            logger.debug('Проверка существования файла')
-            if os.path.exists(args.config):
-                logger.debug('Проверка корректности конфигурационного файла')
-                if self.check_config_file(args.config):
-                    self.CONFIG_FILE = self.load_config_file()
-                    logger.info(f'Загружен конфигурационный файл: "{args.config}"')
-                    self.LOADED_CONFIG_FILE = args.config
-                else:
-                    logger.error(f'Ошибка чтения конфигурационного файла. Завершение программы')
-                    sys.exit()
-            else:
-                logger.error(f'Конфигурационный файл "{args.config}" не найден')
-        else:
-            logger.debug('Поиск конфигурационного файла в стандартных местах расположения')
-            for filepath in DEFAULT_CONFIG_FILES:
-                if not filepath: continue
-                logger.debug(f'Проверка конфигурационного файла "{filepath}"')
-                if os.path.exists(filepath):
-                    if self.check_config_file(filepath):
-                        self.CONFIG_FILE = self.load_config_file(filepath)
-                        self.LOADED_CONFIG_FILE = filepath
-                        logger.info(f'Загружен конфигурационный файл: "{filepath}"')
-                    else:
-                        logger.error(f'Ошибка чтения конфигурационного файла "{filepath}". Завершение программы')
-                        sys.exit()
-                else:
-                    logger.debug(f'Конфигурационный файл "{filepath}" не найден')
-                    continue
-
-        if not self.CONFIG_FILE:
-            logger.warning(f'Конфигурационные файлы не найдены. Будет создан новый: "{DEFAULT_CONFIG_FILES[0]}"')
+    def analyse_config(self):
+        for logging_destination in self.CONFIG_FILE['loggers']:
+            if self.logger.check_destination_availibility(logging_destination[0]):
+                self.logger.add_file_handler(logging_destination[0], self.logger.check_log_level(logging_destination[1]))
     
     def get_temperature(self):
         RODOS_HID.skip_rom_convert()
-        for sensor in self.CONFIG_FILE['sensor_list']:
+        for sensor in Config.SENSOR_LIST:#self.CONFIG_FILE['sensor_list']:
             RODOS_HID.get_temperature(sensor)
         self.logger.info(' '.join((f'{key}={RODOS_HID.TEMPERATURE_LOG[key]}'for key in RODOS_HID.TEMPERATURE_LOG.keys())))
-        if isinstance(self.CONFIG_FILE['save_path'], tuple) or isinstance(self.CONFIG_FILE['save_path'], list):
-            for dest_path in self.CONFIG_FILE['save_path']:
-                self.write_temperature_to_file(dest_path)
-        else:
-            self.write_temperature_to_file(self.CONFIG_FILE['save_path'])
+        self.write_temperature_to_file(Config.TEMP_FILE_PATH)
 
     def write_temperature_to_file(self, dest_path):
         with open(dest_path, 'w', encoding='utf-8') as f:
             f.write(f'''[{datetime.now().strftime('%Y/%m/%d %H:%M:%S')}] ''')
             f.write(' '.join((f'{key}={RODOS_HID.TEMPERATURE_LOG[key]}'for key in RODOS_HID.TEMPERATURE_LOG.keys())))
 
-    def run_idle(self, sleep_time):
+    def run_idle(self, reading_period):
         while True:
             start_time = monotonic()
 
@@ -474,68 +386,304 @@ class TemperatureScanner:
             current, peak = tracemalloc.get_traced_memory()
             self.logger.info(f"Current memory usage is {current / 1024:.2f} KB; Peak was {peak / 1024:.2f} KB")
             
-            if delta_time < sleep_time:
-                sleep(sleep_time - delta_time)
-            
-
-def configure_logger(logger_name):
-    logger = logging.getLogger(logger_name)
-    logger.setLevel(DEFAULT_LOG_LEVEL)
-
-    fh = logging.FileHandler("TempScanner.log", encoding='UTF-8')
-    formatter = logging.Formatter('[%(asctime)s] %(levelname)s | %(name)s: %(message)s')
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
-
-    if args.verbose:
-        sh = logging.StreamHandler()
-        sh.setFormatter(formatter)
-        logger.addHandler(sh)
+            if delta_time < reading_period:
+                sleep(reading_period - delta_time)
     
-    if args.log_level.upper() in ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'):
-        logger.setLevel(args.log_level.upper())
-    else:
-        logger.warning(f'''Введён некорректный уровень логирования: "{args.log_level}". Выбран уровень по умолчанию: "{DEFAULT_LOG_LEVEL}"''')
+    def run(self):
+        if Config.ARGUMENTS.idle:
+            self.run_idle(Config.READING_PERIOD)
+        else:
+            self.get_temperature()
+class Logger:
+    DEFAULT_LOG_LEVEL = 'WARNING'
+    LOG_LEVELS_LIST = ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
+    DEFAULT_FORMATTER = logging.Formatter('[%(asctime)s] %(levelname)s | %(name)s: %(message)s')
+    HANDLERS = []
+    DELAYED_MESSAGES = []
+    
+    def __init__(self, name):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel('DEBUG')
 
-    return logger
+        for handler in Logger.HANDLERS:
+            self.logger.addHandler(handler)
+
+    def update(self):
+        for handler in Logger.HANDLERS:
+            if not handler in self.logger.handlers:
+                self.logger.addHandler(handler)
+    
+    def add_delayed_message(self, level, message):
+        self.DELAYED_MESSAGES.append((level.upper(), message))
+    
+    def send_delayed_messages(self):
+        for message in self.DELAYED_MESSAGES:
+            self.__message(*message)
+
+    @classmethod            
+    def add_file_handler(cls, destination, level='WARNING'):
+        fh = logging.FileHandler(destination, encoding='UTF-8')
+        fh.setFormatter(cls.DEFAULT_FORMATTER)
+        fh.setLevel(level)
+        cls.HANDLERS.append(fh)
+
+    @classmethod
+    def enable_stream_handler(cls, level):
+        sh = logging.StreamHandler()
+        sh.setFormatter(cls.DEFAULT_FORMATTER)
+        sh.setLevel(Logger.check_log_level(level))
+        cls.HANDLERS.append(sh)
+    
+    @classmethod
+    def check_log_level(cls, level):
+        if level.upper() in cls.LOG_LEVELS_LIST:
+            return level.upper()
+        else:
+            return cls.DEFAULT_LOG_LEVEL
+            
+    @classmethod
+    def default_configure(cls):
+        Logger.add_file_handler('TempScanner.log')
+    
+    def __message(self, level, msg):
+        if not self.logger.handlers:
+            self.add_delayed_message(level, msg)
+        else:
+            getattr(self.logger, level.lower())(msg)
+    
+    def debug(self, message):
+        return self.__message('debug', message)
+    
+    def info(self, message):
+        return self.__message('info', message)
+    
+    def warning(self, message):
+        return self.__message('warning', message)
+    
+    def error(self, message):
+        return self.__message('error', message)
+    
+    def critical(self, message):
+        return self.__message('critical', message)
+    
+class Config:
+    DEFAULT_CONFIG_FILES = (
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'TempScanner.config'),
+        os.path.join('/usr', 'local', 'etc', 'TempScanner.config') if platform.system() == 'Linux' else '',
+    )
+    DEFAULT_READING_PERIOD = 2
+    CONFIG_FILE = {}
+    logger = Logger('Config')
+
+    @classmethod
+    def create_new_config_file(cls):
+        cls.logger.warning('')
+        RODOS_HID.find_sensors()
+        creation_date = get_current_date()
+        CONFIG_FILE = {
+            'creation_date': creation_date,
+            'last_edit_date': creation_date,
+            'sensor_list': RODOS_HID.sensors,
+            'temp_file_path': os.path.join(os.path.dirname(cls.DEFAULT_CONFIG_FILES[0]), 'SSI.temp'),
+            "loggers": (),
+            'reading_period': cls.DEFAULT_READING_PERIOD
+        }
+
+        cls.CONFIG_FILE_PATH = cls.DEFAULT_CONFIG_FILES[0]
+        cls._load_from_dict(CONFIG_FILE)
+        cls.logger.debug('Попытка сохранения конфигурационного файла.')
+        cls.save_config_file()
+        cls.logger.info(f'Создан новый конфигурационный файл: "{cls.CONFIG_FILE_PATH}"')
+    
+    @classmethod
+    def save_config_file(cls):
+        CONFIG_FILE = dict(
+            creation_date=cls.CREATION_DATE,
+            last_edit_date=cls.LAST_EDIT_DATE,
+            sensor_list=cls.SENSOR_LIST,
+            temp_file_path=cls.TEMP_FILE_PATH,
+            loggers=cls.LOGGERS,
+            reading_period =cls.READING_PERIOD
+        )
+        try:
+            json.dump(CONFIG_FILE, open(cls.CONFIG_FILE_PATH, 'w', encoding='utf-8'), indent=4)
+        except IOError:
+            cls.logger.error(f'Ошибка записи конфигурационного файла "{cls.CONFIG_FILE_PATH}"')
+
+    @classmethod
+    def load_config_file(cls, filepath):
+        cls.CONFIG_FILE_PATH = filepath
+
+        CONFIG_FILE = json.load(open(cls.CONFIG_FILE_PATH, 'r', encoding='UTF-8'))
+
+        cls._load_from_dict(CONFIG_FILE)
+
+        for loggerpath, level in cls.LOGGERS:
+            Logger.add_file_handler(loggerpath, level)
+
+        if cls.ARGUMENTS.verbose:
+            Logger.enable_stream_handler(cls.ARGUMENTS.log_level)
+
+        cls.logger.update()
+        cls.logger.send_delayed_messages()
+
+        cls.logger.info(f'Загружен конфигурационный файл "{cls.CONFIG_FILE_PATH}"')
+
+    @classmethod
+    def check_config_file(cls, filepath):
+        if not os.path.exists(filepath):
+            cls.logger.info(f'''Конфигурационный файл "{filepath}" не найден''')
+            return False
+
+        try:
+            with open(filepath, 'r', encoding='UTF-8') as f:
+                f.read(1)
+        except IOError:
+            cls.logger.error(f'Недостаточно прав для чтения конфигурационного файла "{filepath}"')
+            return False
+
+        try:
+            with open(filepath, 'a', encoding='UTF-8') as f:
+                f.write('')
+        except IOError:
+            cls.logger.warning(f'Недостаточно прав для записи конфигурационного файла "{filepath}". Все изменения сохранены не будут.')
+
+        try:
+            config_file = json.load(open(filepath, 'r', encoding='UTF-8'))
+        except ValueError:
+            return False
+
+        if not 'temp_file_path' in config_file.keys():
+            cls.logger.error(f'В конфигурационном файле "{filepath}" отсутствует поле пути сохранения файла (temp_file_path).')
+            return False
+        if not 'sensor_list' in config_file.keys():
+            cls.logger.error(f'В конфигурационном файле "{filepath}" отсутствует список датчиков (sensor_list).')
+            return False
+        if not isinstance(config_file['sensor_list'], list):
+            cls.logger.error(f'В конфигурационном файле "{filepath}" неверно задан список датчиков температуры (sensor_list): {config_file["sensor_list"]}')
+            return False
+        if len(config_file['sensor_list']) == 0:
+            cls.logger.error(f'В конфигурационном файле "{filepath}" список датчиков температуры пуст (sensor_list)')
+            return False
+        if not isinstance(config_file['loggers'], list):
+            cls.logger.error(f'В конфигурационном файле "{filepath}" неверно задан список логгеров (loggers): {config_file["loggers"]}')
+            return False
+
+        if config_file['loggers']:
+            loggers_check = []
+            for loggerpath, level in config_file['loggers']:
+                if level not in Logger.LOG_LEVELS_LIST:
+                    loggers_check.append(False)
+                    continue
+
+                try:
+                    with open(loggerpath, 'a', encoding='UTF-8') as f:
+                        f.write('')
+                except IOError:
+                    cls.logger.warning(f'Недостаточно прав для записи логов в файл "{loggerpath}".')
+                    loggers_check.append(False)
+                    continue
+               
+                loggers_check.append(True)
+
+            if not all(loggers_check):
+                cls.logger.error(f'Один из логгеров в конфигурационном файле "{filepath}" не прошёл проверку. Проверьте корректность ввода.')
+                return False
+        return True
+
+    @classmethod
+    def search_config_file(cls):
+        cls.logger.debug('Поиск конфигурационного файла')
+        if cls.ARGUMENTS.config:
+            cls.logger.info(f'Передан через командную строку пконфигурационный файл "{cls.ARGUMENTS.config}".')
+            cls.logger.debug('Проверка конфигурационного файла')
+            if cls.check_config_file(cls.ARGUMENTS.config):
+                cls.logger.debug('Проверка пройдена. Загрузка конфигурационного файла.')
+                cls.load_config_file(cls.ARGUMENTS.config)
+                return True
+            else:
+                cls.logger.critical('Переданный через коммандную строку конфигурационный файл не прошёл проверку. Завершение программы.')
+                sys.exit()
+
+        cls.logger.debug('Поиск конфигурационного файла в стандартных местах расположения')
+        for filepath in cls.DEFAULT_CONFIG_FILES:
+            if not filepath: continue
+            cls.logger.debug(f'Проверка конфигурационного файла "{filepath}"')
+            if cls.check_config_file(filepath):
+                cls.logger.debug('Проверка пройдена. Загрузка конфигурационного файла.')
+                cls.load_config_file(filepath)
+                return True
+            else:
+                cls.logger.info(f'Конфигурационный файл "{filepath}" не прошёл проверку.')
+                continue
+        return False
+
+    @classmethod
+    def check_rescan(cls):
+        if cls.ARGUMENTS.rescan:
+            cls.logger.info('Обновление списка датчиков температуры.')
+            cls.rescan_sensors()
+    
+    @classmethod
+    def rescan_sensors(cls):
+        RODOS_HID.find_sensors()
+        cls.SENSOR_LIST = RODOS_HID.sensors
+        cls.LAST_EDIT_DATE = get_current_date()
+        cls.save_config_file()
+    
+    @classmethod
+    def set_args(cls, args):
+        cls.ARGUMENTS = args
+    
+    @classmethod
+    def _load_from_dict(cls, config_dict):
+        if 'last_edit_date' in config_dict.keys():
+            cls.LAST_EDIT_DATE = config_dict['last_edit_date']
+        else:
+            cls.LAST_EDIT_DATE = get_current_date()
+
+        if 'creation_date' in config_dict.keys():
+            cls.CREATION_DATE = config_dict['creation_date']
+        else:
+            cls.CREATION_DATE = cls.LAST_EDIT_DATE
+
+        if 'reading_period' in config_dict.keys():
+            cls.READING_PERIOD = config_dict['reading_period']
+        else:
+            cls.logger.warning(f'В конфигурационном файле отсутствует период считывания температуры (reding_period). Установлено значение по умолчанию: {cls.DEFAULT_READING_PERIOD} сек.')
+            cls.READING_PERIOD = cls.DEFAULT_READING_PERIOD
+
+        cls.SENSOR_LIST = config_dict['sensor_list']
+        cls.TEMP_FILE_PATH = config_dict['temp_file_path']
+        cls.LOGGERS = config_dict['loggers']
 
 def get_args():
     parser = argparse.ArgumentParser(description="Some description")
 
-    parser.add_argument('-L', '--log-level', type=str, default=DEFAULT_LOG_LEVEL, help="Уровень сообщений логирования (DEBUG, INFO, WARNING (стандартный), ERROR, CRITICAL)")
+    parser.add_argument('-L', '--log-level', type=str, default='WARNING', help="Уровень сообщений логирования (DEBUG, INFO, WARNING (стандартный), ERROR, CRITICAL)")
     parser.add_argument('-V', '--verbose', action='store_true', help="Вывод сообщений в консоль")
     parser.add_argument('-R', '--rescan', action='store_true', help='Найти подключенные датчики и сохранить информацию в конфигурационный файл')
     parser.add_argument('-C', '--config', type=str, default='', help='Загрузить выбранный конфигурационный файл')
     parser.add_argument('-I', '--idle', action='store_true', help='Запуск программы считывания в бесконечном цикле')
-    parser.add_argument('-S', '--sleep', type=float, default=2.0, help='Периодичность считывания температуры в секундах. (1.0 - 300.0)')
+    # parser.add_argument('-S', '--sleep', type=float, default=2.0, help='Периодичность считывания температуры в секундах. (1.0 - 300.0)')
     args = parser.parse_args()
+
     return args
 
-DEFAULT_LOG_LEVEL = 'WARNING'
+def get_current_date():
+    return datetime.now().strftime('%Y/%m/%d %H:%M:%S')
 
-DEFAULT_CONFIG_FILES = (
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'TempScanner_config.json'),
-    os.path.join('/usr', 'local', 'etc', 'TempScanner_config.json') if platform.system() == 'Linux' else '',
-)
 
 if __name__ == '__main__':
     tracemalloc.start()
+    Config.set_args(get_args())
+    if not Config.search_config_file():
+        Config.create_new_config_file()
+    RODOS_HID.initialize()
+    Config.check_rescan()
 
-    args = get_args()
-    logger = configure_logger(__name__)
-    if args.sleep > 300:
-        logger.warning(f'Введено значение периода считывания выше допустимого ({args.sleep:.2f} сек). Установлено 300 сек.')
-        args.sleep = 300
-    elif args.sleep < 1:
-        logger.warning(f'Введено значение периода считывания ниже допустимого ({args.sleep:.2f} сек). Установлено 1 сек.')
-        args.sleep = 1
     temperature_scanner = TemperatureScanner()
-    if args.rescan:
-        temperature_scanner.rescan_sensors()
-    if args.idle:
-        temperature_scanner.run_idle(args.sleep)
-    else:
-        temperature_scanner.get_temperature()
+    temperature_scanner.run()
 
     tracemalloc.stop()
 
