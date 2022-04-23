@@ -384,7 +384,7 @@ class TemperatureScanner:
             self.logger.debug(f'Считывание температуры выполнено за {delta_time:.3f} сек.')
             
             current, peak = tracemalloc.get_traced_memory()
-            self.logger.info(f"Current memory usage is {current / 1024:.2f} KB; Peak was {peak / 1024:.2f} KB")
+            self.logger.debug(f"Current memory usage is {current / 1024:.2f} KB; Peak was {peak / 1024:.2f} KB")
             
             if delta_time < reading_period:
                 sleep(reading_period - delta_time)
@@ -394,6 +394,7 @@ class TemperatureScanner:
             self.run_idle(Config.READING_PERIOD)
         else:
             self.get_temperature()
+
 class Logger:
     DEFAULT_LOG_LEVEL = 'WARNING'
     LOG_LEVELS_LIST = ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
@@ -532,7 +533,7 @@ class Config:
     @classmethod
     def check_config_file(cls, filepath):
         if not os.path.exists(filepath):
-            cls.logger.info(f'''Конфигурационный файл "{filepath}" не найден''')
+            cls.logger.error(f'''Конфигурационный файл "{filepath}" не найден''')
             return False
 
         try:
@@ -595,7 +596,7 @@ class Config:
     def search_config_file(cls):
         cls.logger.debug('Поиск конфигурационного файла')
         if cls.ARGUMENTS.config:
-            cls.logger.info(f'Передан через командную строку пконфигурационный файл "{cls.ARGUMENTS.config}".')
+            cls.logger.info(f'Передан через командную строку конфигурационный файл "{cls.ARGUMENTS.config}".')
             cls.logger.debug('Проверка конфигурационного файла')
             if cls.check_config_file(cls.ARGUMENTS.config):
                 cls.logger.debug('Проверка пройдена. Загрузка конфигурационного файла.')
@@ -603,6 +604,9 @@ class Config:
                 return True
             else:
                 cls.logger.critical('Переданный через коммандную строку конфигурационный файл не прошёл проверку. Завершение программы.')
+                Logger.enable_stream_handler('info')
+                cls.logger.update()
+                cls.logger.send_delayed_messages()
                 sys.exit()
 
         cls.logger.debug('Поиск конфигурационного файла в стандартных местах расположения')
@@ -632,10 +636,6 @@ class Config:
         cls.save_config_file()
     
     @classmethod
-    def set_args(cls, args):
-        cls.ARGUMENTS = args
-    
-    @classmethod
     def _load_from_dict(cls, config_dict):
         if 'last_edit_date' in config_dict.keys():
             cls.LAST_EDIT_DATE = config_dict['last_edit_date']
@@ -648,7 +648,14 @@ class Config:
             cls.CREATION_DATE = cls.LAST_EDIT_DATE
 
         if 'reading_period' in config_dict.keys():
-            cls.READING_PERIOD = config_dict['reading_period']
+            if config_dict['reading_period'] < 1:
+                cls.logger.warning('Указан слишком маленький период считывания. Установлен минимальный: 1 сек.')
+                cls.READING_PERIOD = 1
+            elif config_dict['reading_period'] > 600:
+                cls.logger.warning('Указан слишком большой период считывания. Установлен максимальный: 600 сек.')
+                cls.READING_PERIOD = 600
+            else:
+                cls.READING_PERIOD = config_dict['reading_period']
         else:
             cls.logger.warning(f'В конфигурационном файле отсутствует период считывания температуры (reding_period). Установлено значение по умолчанию: {cls.DEFAULT_READING_PERIOD} сек.')
             cls.READING_PERIOD = cls.DEFAULT_READING_PERIOD
@@ -657,18 +664,16 @@ class Config:
         cls.TEMP_FILE_PATH = config_dict['temp_file_path']
         cls.LOGGERS = config_dict['loggers']
 
-def get_args():
-    parser = argparse.ArgumentParser(description="Some description")
-
-    parser.add_argument('-L', '--log-level', type=str, default='WARNING', help="Уровень сообщений логирования (DEBUG, INFO, WARNING (стандартный), ERROR, CRITICAL)")
-    parser.add_argument('-V', '--verbose', action='store_true', help="Вывод сообщений в консоль")
-    parser.add_argument('-R', '--rescan', action='store_true', help='Найти подключенные датчики и сохранить информацию в конфигурационный файл')
-    parser.add_argument('-C', '--config', type=str, default='', help='Загрузить выбранный конфигурационный файл')
-    parser.add_argument('-I', '--idle', action='store_true', help='Запуск программы считывания в бесконечном цикле')
-    # parser.add_argument('-S', '--sleep', type=float, default=2.0, help='Периодичность считывания температуры в секундах. (1.0 - 300.0)')
-    args = parser.parse_args()
-
-    return args
+    @classmethod
+    def get_args(cls):
+        parser = argparse.ArgumentParser(add_help=False, description="Скрипт, который выполняет считывание температуры с модуля SiLines RODOS-5 в ОС Linux.")
+        parser.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help='Вывод данного справочного сообщения')
+        parser.add_argument('-v', '--verbose', action='store_true', help="Вывод сообщений в консоль")
+        parser.add_argument('-l', '--log-level', type=str, default='WARNING', help="Задать уровень логирования для вывода в консоль (DEBUG, INFO, WARNING (по умолчанию), ERROR, CRITICAL)")
+        parser.add_argument('-r', '--rescan', action='store_true', help='Найти подключенные датчики и сохранить информацию в конфигурационный файл')
+        parser.add_argument('-c', '--config', type=str, default='', help='Загрузить выбранный конфигурационный файл')
+        parser.add_argument('-i', '--idle', action='store_true', help='Запуск программы считывания в бесконечном цикле')
+        cls.ARGUMENTS = parser.parse_args()
 
 def get_current_date():
     return datetime.now().strftime('%Y/%m/%d %H:%M:%S')
@@ -676,7 +681,7 @@ def get_current_date():
 
 if __name__ == '__main__':
     tracemalloc.start()
-    Config.set_args(get_args())
+    Config.get_args()
     if not Config.search_config_file():
         Config.create_new_config_file()
     RODOS_HID.initialize()
