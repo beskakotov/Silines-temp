@@ -1,4 +1,6 @@
 from distutils.command.config import config
+from locale import currency
+from re import T
 from time import sleep, monotonic
 import logging
 import argparse
@@ -16,6 +18,8 @@ class RODOS_HID:
     USB_BUFI = [0] * 9
     USB_BUFO = [0] * 9
     TEMPERATURE_LOG = {}
+    CURRENCY_LEVELS = (0x00, 0x20, 0x40, 0x60)
+    initialized = False
 
     @classmethod
     def initialize(cls):
@@ -31,6 +35,8 @@ class RODOS_HID:
             sys.exit()
         else:
             cls.logger.info(f'Устройство "{hex(vid)}:{hex(pid)}" успешно открыто')
+        cls.set_temperature_currency(Config.DEFAULT_TEMP_CURRENCY)
+        cls.initialized = True
         
     @classmethod
     def find_device(cls):
@@ -351,10 +357,26 @@ class RODOS_HID:
             cls.error_in_method(inspect.currentframe())
             cls.logger.error(f'Ошибка считывания с датчика: {ROM}')
         return RESULT 
+    
+    @classmethod
+    def set_temperature_currency(cls, level):
+        RESULT = cls.skip_rom() and cls.ow_write_byte(0x4e) and cls.ow_write_byte(0x00) and cls.ow_write_byte(0xff)
+        RESULT = RESULT and cls.ow_write_byte(cls.CURRENCY_LEVELS[level])
+        RESULT = RESULT and cls.skip_rom()
+        RESULT = RESULT and cls.ow_write_byte(0x48)
+
+        if RESULT:
+            cls.logger.info(f'Для всех датчиков установлен уровень точности измерения температуры: {level}')
+        else:
+            cls.logger.error(f'Ошибка установки уровня точности измерения температуры.')
+
+
+        return RESULT
 
 class TemperatureScanner:
     def __init__(self):
         self.logger = Logger(self.__class__.__name__)
+        RODOS_HID.set_temperature_currency(Config.TEMP_CURRENCY)
 
     def analyse_config(self):
         for logging_destination in self.CONFIG_FILE['loggers']:
@@ -370,7 +392,7 @@ class TemperatureScanner:
 
     def write_temperature_to_file(self, dest_path):
         with open(dest_path, 'w', encoding='utf-8') as f:
-            f.write(f'''[{datetime.now().strftime('%Y/%m/%d %H:%M:%S')}] ''')
+            f.write(f'''[{get_current_date()}]> ''')
             f.write(' '.join((f'{key}={RODOS_HID.TEMPERATURE_LOG[key]}'for key in RODOS_HID.TEMPERATURE_LOG.keys())))
 
     def run_idle(self, reading_period):
@@ -473,12 +495,14 @@ class Config:
         os.path.join('/usr', 'local', 'etc', 'TempScanner.config') if platform.system() == 'Linux' else '',
     )
     DEFAULT_READING_PERIOD = 2
+    DEFAULT_TEMP_CURRENCY = 3
     CONFIG_FILE = {}
     logger = Logger('Config')
 
     @classmethod
     def create_new_config_file(cls):
-        cls.logger.warning('')
+        if not RODOS_HID.initialized:
+            RODOS_HID.initialize()
         RODOS_HID.find_sensors()
         creation_date = get_current_date()
         CONFIG_FILE = {
@@ -487,7 +511,8 @@ class Config:
             'sensor_list': RODOS_HID.sensors,
             'temp_file_path': os.path.join(os.path.dirname(cls.DEFAULT_CONFIG_FILES[0]), 'SSI.temp'),
             "loggers": (),
-            'reading_period': cls.DEFAULT_READING_PERIOD
+            'reading_period': cls.DEFAULT_READING_PERIOD,
+            'temp_currency': cls.DEFAULT_TEMP_CURRENCY,
         }
 
         cls.CONFIG_FILE_PATH = cls.DEFAULT_CONFIG_FILES[0]
@@ -504,7 +529,8 @@ class Config:
             sensor_list=cls.SENSOR_LIST,
             temp_file_path=cls.TEMP_FILE_PATH,
             loggers=cls.LOGGERS,
-            reading_period =cls.READING_PERIOD
+            reading_period =cls.READING_PERIOD,
+            temp_currency = cls.TEMP_CURRENCY
         )
         try:
             json.dump(CONFIG_FILE, open(cls.CONFIG_FILE_PATH, 'w', encoding='utf-8'), indent=4)
@@ -657,9 +683,22 @@ class Config:
             else:
                 cls.READING_PERIOD = config_dict['reading_period']
         else:
-            cls.logger.warning(f'В конфигурационном файле отсутствует период считывания температуры (reding_period). Установлено значение по умолчанию: {cls.DEFAULT_READING_PERIOD} сек.')
+            cls.logger.warning(f'В конфигурационном файле отсутствует поле периода считывания температуры (reding_period). Установлено значение по умолчанию: {cls.DEFAULT_READING_PERIOD} сек.')
             cls.READING_PERIOD = cls.DEFAULT_READING_PERIOD
 
+        if 'temp_currency' in config_dict.keys():
+            if config_dict["temp_currency"] < 0:
+                cls.logger.warning(f'Слишком низкий уровень точности температуры: {config_dict["temp_currency"]}. Установлен минимальный: 0')
+                cls.TEMP_CURRENCY = 0
+            elif config_dict['temp_currency'] > 3:
+                cls.logger.warning(f'Слишком высокий уровень точности температуры: {config_dict["temp_currency"]}. Установлен максимальный: 3')
+                cls.TEMP_CURRENCY = 3
+            else:
+                cls.TEMP_CURRENCY = config_dict['temp_currency']
+        else:
+            cls.logger.warning(f'В конфигурационном файле отсутствует поле точности измерения температуры (temp_currency). Установлено значение по умолчанию: {cls.DEFAULT_TEMP_CURRENCY}')
+            cls.TEMP_CURRENCY = cls.DEFAULT_TEMP_CURRENCY
+        
         cls.SENSOR_LIST = config_dict['sensor_list']
         cls.TEMP_FILE_PATH = config_dict['temp_file_path']
         cls.LOGGERS = config_dict['loggers']
@@ -673,18 +712,32 @@ class Config:
         parser.add_argument('-r', '--rescan', action='store_true', help='Найти подключенные датчики и сохранить информацию в конфигурационный файл')
         parser.add_argument('-c', '--config', type=str, default='', help='Загрузить выбранный конфигурационный файл')
         parser.add_argument('-i', '--idle', action='store_true', help='Запуск программы считывания в бесконечном цикле')
+        parser.add_argument('-s', '--show', action='store_true', help='Данный ключ позволяет найти все доступные датчики температуры, вывести их в консоль и завершить работу скрипта.')
         cls.ARGUMENTS = parser.parse_args()
 
 def get_current_date():
-    return datetime.now().strftime('%Y/%m/%d %H:%M:%S')
+    return datetime.now().strftime('%d.%m.%Y %H:%M:%S')
 
 
 if __name__ == '__main__':
     tracemalloc.start()
     Config.get_args()
+
+    if Config.ARGUMENTS.show:
+        RODOS_HID.initialize()
+        RODOS_HID.find_sensors()
+        print('='*40)
+        print(f'Найдено температурных датчиков: {len(RODOS_HID.sensors)}. Список:')
+        for sensor in RODOS_HID.sensors:
+            print(sensor)
+        print('='*40)
+        sys.exit()
+
     if not Config.search_config_file():
         Config.create_new_config_file()
+
     RODOS_HID.initialize()
+
     Config.check_rescan()
 
     temperature_scanner = TemperatureScanner()
