@@ -370,7 +370,7 @@ class TemperatureScanner:
 
     def write_temperature_to_file(self, dest_path):
         with open(dest_path, 'w', encoding='utf-8') as f:
-            f.write(f'''[{datetime.now().strftime('%Y/%m/%d %H:%M:%S')}] ''')
+            f.write(f'''[{get_current_date()}] ''')
             f.write(' '.join((f'{key}={RODOS_HID.TEMPERATURE_LOG[key]}'for key in RODOS_HID.TEMPERATURE_LOG.keys())))
 
     def run_idle(self, reading_period):
@@ -478,7 +478,6 @@ class Config:
 
     @classmethod
     def create_new_config_file(cls):
-        cls.logger.warning('')
         RODOS_HID.find_sensors()
         creation_date = get_current_date()
         CONFIG_FILE = {
@@ -673,15 +672,25 @@ class Config:
         parser.add_argument('-r', '--rescan', action='store_true', help='Найти подключенные датчики и сохранить информацию в конфигурационный файл')
         parser.add_argument('-c', '--config', type=str, default='', help='Загрузить выбранный конфигурационный файл')
         parser.add_argument('-i', '--idle', action='store_true', help='Запуск программы считывания в бесконечном цикле')
+        parser.add_argument('-s', '--show', action='store_true', help='Данный ключ позволяет найти все доступные датчики температуры, вывести их в консоль и завершить работу скрипта.')
         cls.ARGUMENTS = parser.parse_args()
 
 def get_current_date():
-    return datetime.now().strftime('%Y/%m/%d %H:%M:%S')
+    return datetime.now().strftime('%d.%m.%Y %H:%M:%S')
 
 
 if __name__ == '__main__':
     tracemalloc.start()
     Config.get_args()
+    if Config.ARGUMENTS.show:
+        RODOS_HID.initialize()
+        RODOS_HID.find_sensors()
+        print('='*40)
+        print(f'Найдено температурных датчиков: {len(RODOS_HID.sensors)}. Список:')
+        for sensor in RODOS_HID.sensors:
+            print(sensor)
+        print('='*40)
+        sys.exit()
     if not Config.search_config_file():
         Config.create_new_config_file()
     RODOS_HID.initialize()
